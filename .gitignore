@@ -1,0 +1,12 @@
+# Secrets — NEVER commit
+slack_webhook.txt
+
+# Runtime artifacts (auto-generated, contain live operational data)
+state.json
+baselines.json
+baseline_shadow.log
+*.log
+
+# Local data snapshots
+error_snapshots/
+pos_errors_*.csv

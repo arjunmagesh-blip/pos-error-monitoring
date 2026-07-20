@@ -1,0 +1,29 @@
+{
+  "_comment": "Rates are fractions (0.03 = 3%). Derived from ~2 weeks of snapshots: baseline ~0.5% fail, ~0.13% timeout system-wide. An alert fires when volume >= min_orders AND (fail_rate or timeout_rate) crosses a level. Edit and the next hourly run picks it up.",
+  "window_hours": 4,
+  "system": {
+    "min_orders": 1000,
+    "warn":     { "fail_rate": 0.015, "timeout_rate": 0.008 },
+    "critical": { "fail_rate": 0.03,  "timeout_rate": 0.015 }
+  },
+  "integration": {
+    "min_orders": 150,
+    "warn":     { "fail_rate": 0.04, "timeout_rate": 0.025 },
+    "critical": { "fail_rate": 0.08, "timeout_rate": 0.05 }
+  },
+  "merchant": {
+    "min_orders": 25,
+    "warn":     { "fail_rate": 0.30, "timeout_rate": 0.15 },
+    "critical": { "fail_rate": 0.50, "timeout_rate": 0.30 }
+  },
+  "baseline": {
+    "_comment": "Per-integration deviation-from-own-baseline tier. Catches a partner surging above ITS normal fail rate even when the absolute rate is far below the integration floor (e.g. XILNEX 0.5% vs a ~0.1% baseline). Fires only when ALL of: fails>=min_fails, rate>=min_ratio*baseline_mean, rate>=baseline_mean+sigma*baseline_std. Runs in shadow (dry_run) — computed and logged to baseline_shadow.log, NOT posted to Slack — until backtested. Baselines in baselines.json, refreshed each run from daily snapshots.",
+    "enabled": true,
+    "dry_run": false,
+    "baseline_days": 14,
+    "min_fails": 30,
+    "sigma": 3.0,
+    "min_ratio": 2.0
+  },
+  "renotify_hours": 6
+}
