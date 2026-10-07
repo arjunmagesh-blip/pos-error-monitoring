@@ -117,18 +117,27 @@ if bcfg.get("enabled"):
             current[f"baseline::{ev['name']}"] = ev
 
 # Merchant
+# near_outage: low-volume merchants never reach min_orders in a window, so a
+# near-total outage (e.g. 75/78 failing across a day) slips under the floor.
+# Fires critical on absolute fails + very high rate, regardless of min_orders.
 c = THR["merchant"]
+no = c.get("near_outage", {})
 for r in rows:
+    if r["total"] <= 0:
+        continue
+    fr, tr = r["fails"] / r["total"], r["timeouts"] / r["total"]
+    lv, drv, near = None, None, False
     if r["total"] >= c["min_orders"]:
-        fr, tr = r["fails"] / r["total"], r["timeouts"] / r["total"]
         lv, drv = level(c["warn"], c["critical"], fr, tr)
-        if lv:
-            current[f"merchant::{r['merchant_key']}"] = {
-                "level": lv, "scope": "MERCHANT",
-                "name": f"{r['merchant_name']} ({r['pos_partner']}, {r['country']})",
-                "metric": drv[0], "value": drv[1], "orders": r["total"],
-                "fails": r["fails"], "timeouts": r["timeouts"],
-                "sample": (r.get("sample_message") or "").strip()}
+    if not lv and no.get("enabled") and r["fails"] >= no["min_fails"] and fr >= no["fail_rate"]:
+        lv, drv, near = "critical", ("fail", fr), True
+    if lv:
+        current[f"merchant::{r['merchant_key']}"] = {
+            "level": lv, "scope": "MERCHANT · NEAR-OUTAGE" if near else "MERCHANT",
+            "name": f"{r['merchant_name']} ({r['pos_partner']}, {r['country']})",
+            "metric": drv[0], "value": drv[1], "orders": r["total"],
+            "fails": r["fails"], "timeouts": r["timeouts"],
+            "sample": (r.get("sample_message") or "").strip()}
 
 # --- Diff against state -> events ---
 renotify = datetime.timedelta(hours=THR.get("renotify_hours", 6))
@@ -171,6 +180,15 @@ with open(state_path, "w") as f:
 
 if not events:
     sys.exit(0)
+
+# Audit trail: one line per event to stderr (monitor.sh appends stderr to monitor.log).
+for kind, aid, d in events:
+    if kind == "RESOLVED":
+        sys.stderr.write(f"[alert] RESOLVED {aid}\n")
+    else:
+        sys.stderr.write(f"[alert] {kind} {d['level']} {d['scope']} {d['name']} "
+                         f"{d['metric']}={d['value']*100:.1f}% "
+                         f"fails={d['fails']} timeouts={d['timeouts']} orders={d['orders']}\n")
 
 # --- Format Slack Block Kit ---
 EMOJI = {"critical": "🔴", "warn": "⚠️"}

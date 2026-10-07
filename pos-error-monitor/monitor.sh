@@ -8,11 +8,20 @@
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# Hold an idle-sleep assertion for the whole run so the Mac can't doze off
+# mid-query (runs used to hang for hours and get killed on wake). Does NOT stop
+# lid-close sleep; missed runs are handled by the catch-up window below.
+if [ -z "$POS_MONITOR_CAFFEINATED" ]; then
+  export POS_MONITOR_CAFFEINATED=1
+  exec /usr/bin/caffeinate -i "$0" "$@"
+fi
+
 SKILL="$HOME/posdata/.claude/skills/pos-error-monitor"
 OUT="$HOME/posdata/error_snapshots"
 LOG="$OUT/monitor.log"
 STATE="$SKILL/state.json"
 WEBHOOK_FILE="$SKILL/slack_webhook.txt"
+LAST_OK="$SKILL/last_success"   # epoch seconds of the last completed (non-dry) run
 mkdir -p "$OUT"
 
 DRY=0
@@ -50,6 +59,22 @@ fi
 # --- Window hours from thresholds.json (default 4) ---
 WH=$(python3 -c "import json;print(json.load(open('$SKILL/thresholds.json')).get('window_hours',4))" 2>/dev/null)
 [ -z "$WH" ] && WH=4
+
+# --- Coverage gap catch-up. Runs are hourly 07:00-23:00, so the expected gap is
+#     ~1h (or ~8h for the first run of the day). If runs were missed (Mac asleep),
+#     widen this window to cover the missed period, capped at 12h. ---
+if [ -s "$LAST_OK" ]; then
+  now_s=$(date +%s); last_s=$(cat "$LAST_OK")
+  gap_min=$(( (now_s - last_s) / 60 ))
+  [ "$(date +%H)" = "07" ] && expect_min=510 || expect_min=90
+  if [ "$gap_min" -gt "$expect_min" ]; then
+    catch_h=$(( (gap_min + 59) / 60 + 1 ))
+    [ "$catch_h" -gt 12 ] && catch_h=12
+    [ "$catch_h" -gt "$WH" ] && WH=$catch_h
+    echo "[$(ts)] COVERAGE GAP last good run $(date -r "$last_s" '+%Y-%m-%d %H:%M') (${gap_min}m ago); using ${WH}h window" >> "$LOG"
+    notify "Monitor missed runs since $(date -r "$last_s" '+%H:%M'). Catching up with a ${WH}h window."
+  fi
+fi
 
 # --- Refresh per-integration baselines from the daily snapshots (cheap; used by
 #     the shadow baseline-deviation tier in evaluate.py). ---
@@ -89,6 +114,8 @@ if [ "$rc" -ne 0 ]; then
   echo "[$(ts)] !!! evaluate.py exited $rc" >> "$LOG"
   exit 1
 fi
+
+[ "$DRY" -eq 0 ] && date +%s > "$LAST_OK"
 
 if [ -z "$PAYLOAD" ]; then
   echo "[$(ts)] OK    no alert changes" >> "$LOG"

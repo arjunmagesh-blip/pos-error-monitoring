@@ -16,6 +16,12 @@ problems *as they happen* and pushing alerts to Slack.
 
 **Detection latency ≈ 1.5–2.5h**: the CDC source lags real time by ~1.5h.
 
+**Sleep and missed runs.** The whole run holds a `caffeinate -i` assertion so
+the Mac can't idle-sleep mid-query. It cannot stop lid-close sleep, so after
+missed runs the next run logs `COVERAGE GAP` (plus a desktop notification) and
+widens its window to cover the missed hours (max 12h). `last_success` holds
+the epoch time of the last completed non-dry run.
+
 ## Thresholds (`thresholds.json`)
 Derived from ~2 weeks of snapshots (baseline ~0.5% fail, ~0.13% timeout).
 Edit the file — the next hourly run picks it up, no reload needed.
@@ -28,6 +34,16 @@ Edit the file — the next hourly run picks it up, no reload needed.
 
 `min orders` = volume floor in the window; below it the scope is ignored
 (kills small-sample noise). Timeout = status_code 504.
+
+**Near-outage (merchant):** low-volume outlets rarely reach 25 orders in a
+window, so a near-total outage could slip under the floor (6 Oct 2026: 75/78
+failing all day, no alert). `merchant.near_outage` fires 🔴 critical when
+fails >= 12 AND fail rate >= 80%, ignoring `min orders`. Backtest over
+23 Sep-6 Oct 2026: ~1 extra incident/day, all 82-100% failing, no chronic
+repeaters. Slack shows these as `MERCHANT · NEAR-OUTAGE`.
+
+**Baseline deviation (integration):** see the `baseline` block in
+`thresholds.json` (partner fail rate vs its own 14-day baseline).
 
 ## Manual use
 ```
@@ -43,10 +59,12 @@ Edit the file — the next hourly run picks it up, no reload needed.
 - `thresholds.json` — tunable thresholds & window
 - `slack_webhook.txt` — Slack incoming-webhook URL (chmod 600)
 - `state.json` — active-alert state (auto-managed; `{}` = all clear)
+- `last_success` — epoch of last completed run (drives gap catch-up)
 
 ## Logs
 `~/posdata/error_snapshots/monitor.log` (app), `monitor.launchd.{out,err}.log`
-(launchd). If an alert fires but no webhook is set, the payload is appended to
+(launchd). Every alert event is logged as an `[alert] ...` line (kind, level,
+scope, name, rate, counts) just before the Slack post result. If an alert fires but no webhook is set, the payload is appended to
 `monitor_unsent_alerts.log` and a desktop notification fires.
 
 ## launchd

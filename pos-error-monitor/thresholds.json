@@ -14,7 +14,13 @@
   "merchant": {
     "min_orders": 25,
     "warn":     { "fail_rate": 0.30, "timeout_rate": 0.15 },
-    "critical": { "fail_rate": 0.50, "timeout_rate": 0.30 }
+    "critical": { "fail_rate": 0.50, "timeout_rate": 0.30 },
+    "near_outage": {
+      "_comment": "Critical alert for low-volume merchants that never reach min_orders: fires when fails>=min_fails AND fail_rate>=fail_rate, ignoring min_orders. Backtest 23 Sep-6 Oct 2026: ~15 extra merchant-days (about 1/day), all 82-100% failing, no chronic repeaters. Lower min_fails to 10 for earlier catches (~28 merchant-days, 1 chronic).",
+      "enabled": true,
+      "min_fails": 12,
+      "fail_rate": 0.80
+    }
   },
   "baseline": {
     "_comment": "Per-integration deviation-from-own-baseline tier. Catches a partner surging above ITS normal fail rate even when the absolute rate is far below the integration floor (e.g. XILNEX 0.5% vs a ~0.1% baseline). Fires only when ALL of: fails>=min_fails, rate>=min_ratio*baseline_mean, rate>=baseline_mean+sigma*baseline_std. Runs in shadow (dry_run) — computed and logged to baseline_shadow.log, NOT posted to Slack — until backtested. Baselines in baselines.json, refreshed each run from daily snapshots.",
